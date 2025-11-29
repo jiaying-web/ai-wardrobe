@@ -43,10 +43,10 @@ class ClothingItem:
         }
 
 def get_real_weather():
-    """使用 Open-Meteo 免費 API 獲取台北天氣"""
+    """使用 Open-Meteo 免費 API 獲取新竹市天氣"""
     try:
-        # 台北的經緯度 (25.03, 121.56)
-        url = "https://api.open-meteo.com/v1/forecast?latitude=25.03&longitude=121.56&current_weather=true"
+        # 新竹市的經緯度 (24.81, 120.97)
+        url = "https://api.open-meteo.com/v1/forecast?latitude=24.81&longitude=120.97&current_weather=true"
         response = requests.get(url)
         data = response.json()
         temp = data['current_weather']['temperature']
@@ -96,6 +96,7 @@ if 'user_name' not in st.session_state:
                 # 預設給幾件衣服當範例
                 st.session_state.wardrobe.append(ClothingItem("白色素T", "上衣", "白", "棉"))
                 st.session_state.wardrobe.append(ClothingItem("牛仔褲", "下身", "藍", "牛仔布"))
+                st.session_state.wardrobe.append(ClothingItem("防風外套", "外套", "黑", "尼龍"))
             st.rerun()
     st.stop() 
 
@@ -115,7 +116,7 @@ tab1, tab2, tab3 = st.tabs(["🌤️ 智能穿搭", "📸 AI 入庫", "🗄️ �
 
 # --- 分頁 1: 智能穿搭 (接真實天氣) ---
 with tab1:
-    st.subheader("今日台北天氣")
+    st.subheader("今日新竹天氣")
     
     # 自動抓天氣
     if 'current_temp' not in st.session_state:
@@ -142,20 +143,36 @@ with tab1:
         else:
             tops = [x for x in wardrobe if x.category == "上衣"]
             bottoms = [x for x in wardrobe if x.category == "下身"]
+            outers = [x for x in wardrobe if x.category == "外套"] # 抓出外套清單
             
             if tops and bottoms:
-                # 簡單隨機搭配
+                # 隨機挑選上衣和褲子
                 top = random.choice(tops)
                 bottom = random.choice(bottoms)
+                
+                # 判斷是否需要外套 (氣溫 < 20 且有外套庫存)
+                selected_outer = None
+                if st.session_state.current_temp < 20 and outers:
+                    selected_outer = random.choice(outers)
                 
                 st.balloons()
                 st.subheader("💡 今天的推薦搭配：")
                 
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown(f"### 👕 上身\n**{top.name}**\n\n<span style='color:gray'>{top.material} / {top.color}</span>", unsafe_allow_html=True)
-                with c2:
-                    st.markdown(f"### 👖 下身\n**{bottom.name}**\n\n<span style='color:gray'>{bottom.material} / {bottom.color}</span>", unsafe_allow_html=True)
+                # 根據有沒有外套，決定顯示 2 欄還是 3 欄
+                if selected_outer:
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.markdown(f"### 👕 上身\n**{top.name}**\n\n<span style='color:gray'>{top.material} / {top.color}</span>", unsafe_allow_html=True)
+                    with c2:
+                        st.markdown(f"### 👖 下身\n**{bottom.name}**\n\n<span style='color:gray'>{bottom.material} / {bottom.color}</span>", unsafe_allow_html=True)
+                    with c3:
+                        st.markdown(f"### 🧥 外套\n**{selected_outer.name}**\n\n<span style='color:gray'>{selected_outer.material} / {selected_outer.color}</span>", unsafe_allow_html=True)
+                else:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.markdown(f"### 👕 上身\n**{top.name}**\n\n<span style='color:gray'>{top.material} / {top.color}</span>", unsafe_allow_html=True)
+                    with c2:
+                        st.markdown(f"### 👖 下身\n**{bottom.name}**\n\n<span style='color:gray'>{bottom.material} / {bottom.color}</span>", unsafe_allow_html=True)
             else:
                 st.error("無法組成完整搭配（缺少上衣或褲子），請先去新增衣物！")
 
