@@ -157,7 +157,7 @@ with st.sidebar:
             del st.session_state[key]
         st.rerun()
     st.divider()
-    st.info("💡 這次更新後，上傳的照片會被保存下來，並且顯示在每日穿搭中喔！")
+    st.info("💡 這次更新後，在「購物建議」可以直接瀏覽分類，不用打字也能檢查衣櫃喔！")
 
 st.title(f"👗 {st.session_state.user_name} 的智能衣櫃")
 
@@ -231,32 +231,70 @@ with tab1:
                 with c1: show_outfit_card("👕 上身", top)
                 with c2: show_outfit_card("👖 下身", bottom)
 
-# --- 分頁 2: 購物建議 ---
+# --- 分頁 2: 購物建議 (優化版) ---
 with tab2:
     st.header("🛍️ 購物小幫手")
-    st.write("輸入關鍵字，檢查衣櫃有沒有類似款！")
     
-    search_query = st.text_input("你想買什麼？", placeholder="例如: 白色T恤...")
+    # 1. 庫存統計儀表板
+    wardrobe = st.session_state.wardrobe
+    counts = {
+        "上衣": len([x for x in wardrobe if x.category == "上衣"]),
+        "下身": len([x for x in wardrobe if x.category == "下身"]),
+        "外套": len([x for x in wardrobe if x.category == "外套"]),
+        "飾品": len([x for x in wardrobe if x.category == "飾品"]),
+    }
     
+    st.caption("📊 你的衣櫃庫存概況：")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("上衣", f"{counts['上衣']} 件")
+    c2.metric("下身", f"{counts['下身']} 件")
+    c3.metric("外套", f"{counts['外套']} 件")
+    c4.metric("飾品", f"{counts['飾品']} 件")
+    st.divider()
+
+    st.subheader("🔍 檢查是否有類似款")
+    
+    # 2. 搜尋與篩選區
+    col_search, col_filter = st.columns([2, 1])
+    
+    with col_search:
+        search_query = st.text_input("輸入關鍵字搜尋", placeholder="例如: 白色T恤...")
+    with col_filter:
+        filter_category = st.selectbox("或按類別瀏覽", ["(全部顯示)", "上衣", "下身", "外套", "飾品"])
+
+    # 3. 顯示邏輯
+    display_items = []
+    
+    # 如果有輸入關鍵字，優先使用關鍵字搜尋
     if search_query:
-        similar_results = find_similar_items(search_query, st.session_state.wardrobe)
-        
-        st.divider()
-        if similar_results:
-            st.warning(f"⚠️ 你的衣櫃已經有 {len(similar_results)} 件類似物品：")
-            
-            # 使用 columns 讓顯示更整齊，每行顯示 3 件
-            cols = st.columns(3)
-            for idx, item in enumerate(similar_results):
-                with cols[idx % 3]:
+        display_items = find_similar_items(search_query, wardrobe)
+        if not display_items:
+            st.info("找不到相關物品，衣櫃裡沒有類似款！")
+    # 如果沒有關鍵字，但選了特定類別，顯示該類別所有物品
+    elif filter_category != "(全部顯示)":
+        display_items = [x for x in wardrobe if x.category == filter_category]
+        if not display_items:
+            st.info(f"你的衣櫃裡還沒有 {filter_category} 喔！")
+    # 如果什麼都沒選，預設顯示全部 (或提示使用者)
+    else:
+        st.info("👆 請輸入關鍵字，或選擇類別來查看衣櫃內容。")
+        display_items = [] # 預設不顯示，避免畫面太亂，或者也可以設為 wardrobe 顯示全部
+
+    # 4. 顯示結果卡片
+    if display_items:
+        st.write(f"找到 {len(display_items)} 件物品：")
+        cols = st.columns(3)
+        for idx, item in enumerate(display_items):
+            with cols[idx % 3]:
+                with st.container(border=True):
+                    # 顯示圖片
                     if item.image_path and os.path.exists(item.image_path):
                         st.image(item.image_path, use_container_width=True)
+                    else:
+                        st.markdown("<div style='height:100px; background-color:#f0f2f6; display:flex; align-items:center; justify-content:center;'>無圖片</div>", unsafe_allow_html=True)
+                    
                     st.write(f"**{item.name}**")
-                    st.caption(f"{item.category} / {item.color}")
-            
-            st.info("💡 建議：不需要重複購買喔！")
-        else:
-            st.success("✅ 衣櫃裡沒有類似款，可以買！")
+                    st.caption(f"{item.category} / {item.color} / {item.material}")
 
 # --- 分頁 3: 新增衣物 (包含存檔圖片) ---
 with tab3:
@@ -295,7 +333,7 @@ with tab3:
             else:
                 st.warning("請輸入名稱")
 
-# --- 分頁 4: 衣櫃管理 (新增編輯功能) ---
+# --- 分頁 4: 衣櫃管理 (新增編輯功能 + 圖片更換) ---
 with tab4:
     st.subheader("我的衣櫃庫存")
     if not st.session_state.wardrobe:
@@ -311,6 +349,10 @@ with tab4:
                     # === 編輯模式 ===
                     with st.form(f"edit_form_{i}"):
                         st.caption("✏️ 編輯中...")
+                        
+                        # 允許更換圖片
+                        new_image_file = st.file_uploader("更換照片 (選填)", type=["jpg", "png", "jpeg"], key=f"edit_img_{i}")
+                        
                         new_name = st.text_input("名稱", value=item.name)
                         new_cat = st.selectbox("類別", ["上衣", "下身", "外套", "飾品"], index=["上衣", "下身", "外套", "飾品"].index(item.category))
                         new_color = st.text_input("顏色", value=item.color)
@@ -318,11 +360,16 @@ with tab4:
                         
                         col_save, col_cancel = st.columns(2)
                         if col_save.form_submit_button("💾 儲存修改", type="primary"):
-                            # 更新物件資料
+                            # 如果有上傳新圖片，就更新路徑，否則維持原樣
+                            if new_image_file:
+                                item.image_path = save_uploaded_image(new_image_file)
+                            
+                            # 更新其他文字資料
                             item.name = new_name
                             item.category = new_cat
                             item.color = new_color
                             item.material = new_mat
+                            
                             # 存檔
                             save_current_user_data()
                             # 關閉編輯模式
