@@ -92,10 +92,31 @@ def save_uploaded_image(uploaded_file):
     return file_path
 
 # --- 其他功能 ---
-def get_real_weather():
-    """使用 Open-Meteo 免費 API 獲取新竹市天氣"""
+def get_coordinates(city_name):
+    """將城市名稱轉換為經緯度 (使用 Open-Meteo Geocoding API)"""
     try:
-        url = "https://api.open-meteo.com/v1/forecast?latitude=24.81&longitude=120.97&current_weather=true"
+        url = f"https://geocoding-api.open-meteo.com/v1/search?name={city_name}&count=1&language=zh&format=json"
+        response = requests.get(url)
+        data = response.json()
+        if "results" in data and len(data["results"]) > 0:
+            return data["results"][0]["latitude"], data["results"][0]["longitude"]
+    except:
+        pass
+    return None, None
+
+def get_real_weather(city_name="新竹市"):
+    """使用 Open-Meteo 免費 API 獲取指定城市天氣"""
+    try:
+        # 1. 先取得經緯度
+        lat, lon = get_coordinates(city_name)
+        
+        # 如果找不到該城市，預設回傳新竹市座標 (24.81, 120.97)
+        if lat is None or lon is None:
+            lat, lon = 24.81, 120.97
+            st.toast(f"⚠️ 找不到「{city_name}」，已為您顯示新竹市天氣。", icon="🗺️")
+            
+        # 2. 再查詢天氣
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
         response = requests.get(url)
         data = response.json()
         temp = data['current_weather']['temperature']
@@ -152,11 +173,24 @@ if 'user_name' not in st.session_state:
 # --- 2. 主畫面 ---
 with st.sidebar:
     st.write(f"👤 使用者：**{st.session_state.user_name}**")
+    
+    st.divider()
+    
+    # === 新增：城市選擇器 ===
+    st.subheader("🌍 設定位置")
+    selected_city = st.text_input("輸入城市名稱", value="新竹市")
+    
+    # 如果城市變更，強制更新天氣
+    if 'last_city' not in st.session_state or st.session_state.last_city != selected_city:
+        st.session_state.current_temp = get_real_weather(selected_city)
+        st.session_state.last_city = selected_city
+    
+    st.divider()
+    
     if st.button("登出"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
-    st.divider()
     st.info("💡 在「衣櫃管理」可以透過分類按鈕快速尋找衣服喔！")
 
 st.title(f"👗 {st.session_state.user_name} 的智能衣櫃")
@@ -165,10 +199,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["🌤️ 智能穿搭", "🛍️ 購物建議"
 
 # --- 分頁 1: 智能穿搭 (顯示圖片版) ---
 with tab1:
-    st.subheader("今日新竹天氣")
-    
-    if 'current_temp' not in st.session_state:
-        st.session_state.current_temp = get_real_weather()
+    st.subheader(f"今日 {selected_city} 天氣")
     
     col1, col2 = st.columns([1, 3])
     with col1:
