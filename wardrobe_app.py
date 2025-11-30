@@ -4,7 +4,7 @@ import google.generativeai as genai
 from PIL import Image
 import json
 import random
-import os  # 新增：用來處理檔案路徑
+import os
 
 # ==========================================
 # ⚙️ 設定區
@@ -36,7 +36,6 @@ class ClothingItem:
     def __repr__(self):
         return f"{self.name}"
 
-    # 物件轉字典 (存檔用)
     def to_dict(self):
         return {
             "name": self.name,
@@ -45,32 +44,27 @@ class ClothingItem:
             "material": self.material
         }
 
-    # 字典轉物件 (讀檔用) - 新增這段才能把紀錄救回來
     @staticmethod
     def from_dict(data):
         return ClothingItem(data["name"], data["category"], data["color"], data["material"])
 
 # --- 資料庫存取函式 ---
 def load_all_data():
-    """讀取所有使用者的資料"""
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except:
-            return {} # 如果檔案壞掉，回傳空字典
+            return {}
     return {}
 
 def save_all_data(data):
-    """將資料寫入檔案"""
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 def save_current_user_data():
-    """儲存目前使用者的衣櫃到資料庫"""
     if 'user_name' in st.session_state and 'wardrobe' in st.session_state:
         db = load_all_data()
-        # 把衣服物件轉換成可以存檔的格式
         user_items = [item.to_dict() for item in st.session_state.wardrobe]
         db[st.session_state.user_name] = user_items
         save_all_data(db)
@@ -90,22 +84,40 @@ def get_real_weather():
 def analyze_image_with_ai(image):
     """使用 Google Gemini 辨識衣服"""
     if not GENAI_API_KEY:
-        st.error("尚未設定 API Key")
+        st.error("⚠️ 尚未設定 API Key，無法使用 AI 辨識。")
         return None
     
+    # 使用更穩定快速的模型
     model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    # 簡化 Prompt，提高成功率
     prompt = """
-    你是一個服裝辨識專家。請分析這張圖片中的主要衣物。
-    請只回傳一個 JSON 格式，包含以下欄位：
-    {"name": "簡短名稱(例如: 藍色牛仔外套)", "category": "上衣/下身/外套/飾品", "color": "顏色", "material": "推測材質"}
-    不要回傳任何 Markdown 格式，只要純 JSON 文字。
+    分析這張圖片中的衣物。
+    請回傳純 JSON 格式，不要有任何 Markdown (如 ```json) 或其他文字。
+    格式如下：
+    {
+        "name": "衣物簡短名稱 (例如: 藍色牛仔外套)",
+        "category": "請從 [上衣, 下身, 外套, 飾品] 中選一個最接近的",
+        "color": "顏色",
+        "material": "材質"
+    }
     """
     try:
         response = model.generate_content([prompt, image])
-        clean_text = response.text.replace('```json', '').replace('```', '').strip()
+        
+        # 嘗試清理並解析 JSON
+        clean_text = response.text.strip()
+        if clean_text.startswith("```json"):
+            clean_text = clean_text[7:]
+        if clean_text.endswith("```"):
+            clean_text = clean_text[:-3]
+        
         return json.loads(clean_text)
+
     except Exception as e:
-        st.error(f"AI 辨識失敗: {e}")
+        # 在終端機印出詳細錯誤，方便除錯
+        print(f"AI Error: {e}")
+        st.error(f"AI 辨識失敗，請手動輸入資料。")
         return None
 
 # ==========================================
@@ -123,27 +135,17 @@ if 'user_name' not in st.session_state:
     if st.button("進入衣櫃"):
         if name_input:
             st.session_state.user_name = name_input
-            
-            # 讀取資料庫
             db = load_all_data()
-            
             if name_input in db:
-                # 老朋友：載入之前的紀錄
                 st.session_state.wardrobe = [ClothingItem.from_dict(item) for item in db[name_input]]
-                st.toast(f"歡迎回來，{name_input}！已載入你的衣櫃。", icon="👋")
+                st.toast(f"歡迎回來，{name_input}！", icon="👋")
             else:
-                # 新朋友：給預設範例
                 st.session_state.wardrobe = []
                 st.session_state.wardrobe.append(ClothingItem("白色素T", "上衣", "白", "棉"))
-                st.session_state.wardrobe.append(ClothingItem("黑色印花T", "上衣", "黑", "棉"))
                 st.session_state.wardrobe.append(ClothingItem("牛仔褲", "下身", "藍", "牛仔布"))
-                st.session_state.wardrobe.append(ClothingItem("黑色工裝褲", "下身", "黑", "聚酯纖維"))
                 st.session_state.wardrobe.append(ClothingItem("防風外套", "外套", "黑", "尼龍"))
-                
-                # 馬上存檔，建立帳號紀錄
                 save_current_user_data()
-                st.toast(f"嗨 {name_input}，幫你準備了一些範例衣物！", icon="🎁")
-            
+                st.toast(f"嗨 {name_input}，已建立新衣櫃！", icon="🎁")
             st.rerun()
     st.stop() 
 
@@ -151,7 +153,6 @@ if 'user_name' not in st.session_state:
 with st.sidebar:
     st.write(f"👤 使用者：**{st.session_state.user_name}**")
     if st.button("登出"):
-        # 清除 session 但不刪除檔案
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
@@ -240,7 +241,7 @@ with tab2:
                 result = analyze_image_with_ai(image)
                 if result:
                     st.session_state.ai_result = result
-                    st.success("辨識成功！")
+                    st.success("辨識成功！請確認下方資訊並按「加入」。")
 
     res = st.session_state.ai_result
     
@@ -259,11 +260,17 @@ with tab2:
             if name:
                 new_item = ClothingItem(name, category, color, material)
                 st.session_state.wardrobe.append(new_item)
-                # 儲存到檔案
                 save_current_user_data()
                 
                 st.session_state.ai_result = {} 
-                st.success(f"✅ 已加入並存檔：{name}")
+                
+                # ✅ 這裡加上更明顯的成功提示
+                st.success(f"✅ 成功加入！{name} 已存入衣櫃。")
+                st.balloons() # 放氣球慶祝
+                
+                # 稍微等待一下再重新整理，讓使用者看到提示
+                import time
+                time.sleep(1.5)
                 st.rerun()
             else:
                 st.warning("請輸入名稱")
@@ -279,6 +286,5 @@ with tab3:
                 st.write(f"顏色：{item.color} | 材質：{item.material}")
                 if st.button("刪除", key=f"del_{i}"):
                     st.session_state.wardrobe.pop(i)
-                    # 刪除後也要存檔
                     save_current_user_data()
                     st.rerun()
