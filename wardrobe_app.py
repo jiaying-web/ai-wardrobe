@@ -157,7 +157,7 @@ with st.sidebar:
             del st.session_state[key]
         st.rerun()
     st.divider()
-    st.info("💡 這次更新後，在「購物建議」可以直接瀏覽分類，不用打字也能檢查衣櫃喔！")
+    st.info("💡 在「衣櫃管理」可以透過分類按鈕快速尋找衣服喔！")
 
 st.title(f"👗 {st.session_state.user_name} 的智能衣櫃")
 
@@ -205,22 +205,24 @@ with tab1:
             st.balloons()
             st.subheader("💡 今天的推薦搭配：")
             
-            # 定義顯示衣服的函式 (包含圖片)
+            # 定義顯示衣服的函式 (包含圖片顯示邏輯)
             def show_outfit_card(title, item):
-                st.markdown(f"### {title}")
-                # 如果有圖片路徑且檔案存在，就顯示圖片
-                if item.image_path and os.path.exists(item.image_path):
-                    st.image(item.image_path, use_container_width=True)
-                else:
-                    # 沒有圖片時顯示預設圖示
-                    if "上衣" in title: icon = "👕"
-                    elif "下身" in title: icon = "👖"
-                    else: icon = "🧥"
-                    st.markdown(f"<div style='font-size: 50px; text-align: center;'>{icon}</div>", unsafe_allow_html=True)
-                
-                st.markdown(f"**{item.name}**")
-                st.caption(f"{item.color} / {item.material}")
+                with st.container(border=True):
+                    st.markdown(f"### {title}")
+                    # 如果有圖片路徑且檔案存在，就顯示圖片
+                    if item.image_path and os.path.exists(item.image_path):
+                        st.image(item.image_path, use_container_width=True)
+                    else:
+                        # 沒有圖片時顯示預設圖示
+                        if "上衣" in title: icon = "👕"
+                        elif "下身" in title: icon = "👖"
+                        else: icon = "🧥"
+                        st.markdown(f"<div style='font-size: 50px; text-align: center; margin: 10px;'>{icon}</div>", unsafe_allow_html=True)
+                    
+                    st.markdown(f"**{item.name}**")
+                    st.caption(f"{item.color} / {item.material}")
 
+            # 顯示結果 (如果有外套就顯示 3 欄，沒有就 2 欄)
             if selected_outer:
                 c1, c2, c3 = st.columns(3)
                 with c1: show_outfit_card("👕 上身", top)
@@ -333,73 +335,88 @@ with tab3:
             else:
                 st.warning("請輸入名稱")
 
-# --- 分頁 4: 衣櫃管理 (新增編輯功能 + 圖片更換) ---
+# --- 分頁 4: 衣櫃管理 (新增分類篩選 + 編輯功能) ---
 with tab4:
     st.subheader("我的衣櫃庫存")
+    
+    # 使用 Radio 按鈕來做橫向分類篩選，比下拉選單更直覺
+    manage_cat = st.radio("分類檢視：", ["全部", "上衣", "下身", "外套", "飾品"], horizontal=True)
+
     if not st.session_state.wardrobe:
         st.info("衣櫃是空的")
     else:
-        # 遍歷所有衣服
-        for i, item in enumerate(st.session_state.wardrobe):
-            with st.expander(f"{i+1}. {item.name} ({item.category})"):
+        # 根據選擇篩選列表
+        if manage_cat == "全部":
+            filtered_items = st.session_state.wardrobe
+        else:
+            filtered_items = [item for item in st.session_state.wardrobe if item.category == manage_cat]
+
+        if not filtered_items:
+            st.info(f"目前沒有 {manage_cat} 類別的衣物。")
+        else:
+            # 遍歷篩選後的衣服
+            for item in filtered_items:
+                # 必須找到這個 item 在原始清單中的 index，才能正確刪除或編輯
+                original_index = st.session_state.wardrobe.index(item)
                 
-                # 檢查是否處於「編輯模式」
-                edit_key = f"edit_mode_{i}"
-                if st.session_state.get(edit_key, False):
-                    # === 編輯模式 ===
-                    with st.form(f"edit_form_{i}"):
-                        st.caption("✏️ 編輯中...")
-                        
-                        # 允許更換圖片
-                        new_image_file = st.file_uploader("更換照片 (選填)", type=["jpg", "png", "jpeg"], key=f"edit_img_{i}")
-                        
-                        new_name = st.text_input("名稱", value=item.name)
-                        new_cat = st.selectbox("類別", ["上衣", "下身", "外套", "飾品"], index=["上衣", "下身", "外套", "飾品"].index(item.category))
-                        new_color = st.text_input("顏色", value=item.color)
-                        new_mat = st.text_input("材質", value=item.material)
-                        
-                        col_save, col_cancel = st.columns(2)
-                        if col_save.form_submit_button("💾 儲存修改", type="primary"):
-                            # 如果有上傳新圖片，就更新路徑，否則維持原樣
-                            if new_image_file:
-                                item.image_path = save_uploaded_image(new_image_file)
+                with st.expander(f"{item.name} ({item.category})"):
+                    # 檢查是否處於「編輯模式」
+                    edit_key = f"edit_mode_{original_index}"
+                    if st.session_state.get(edit_key, False):
+                        # === 編輯模式 ===
+                        with st.form(f"edit_form_{original_index}"):
+                            st.caption("✏️ 編輯中...")
                             
-                            # 更新其他文字資料
-                            item.name = new_name
-                            item.category = new_cat
-                            item.color = new_color
-                            item.material = new_mat
+                            # 允許更換圖片
+                            new_image_file = st.file_uploader("更換照片 (選填)", type=["jpg", "png", "jpeg"], key=f"edit_img_{original_index}")
                             
-                            # 存檔
+                            new_name = st.text_input("名稱", value=item.name)
+                            new_cat = st.selectbox("類別", ["上衣", "下身", "外套", "飾品"], index=["上衣", "下身", "外套", "飾品"].index(item.category))
+                            new_color = st.text_input("顏色", value=item.color)
+                            new_mat = st.text_input("材質", value=item.material)
+                            
+                            col_save, col_cancel = st.columns(2)
+                            if col_save.form_submit_button("💾 儲存修改", type="primary"):
+                                # 如果有上傳新圖片，就更新路徑，否則維持原樣
+                                if new_image_file:
+                                    item.image_path = save_uploaded_image(new_image_file)
+                                
+                                # 更新其他文字資料
+                                item.name = new_name
+                                item.category = new_cat
+                                item.color = new_color
+                                item.material = new_mat
+                                
+                                # 存檔
+                                save_current_user_data()
+                                # 關閉編輯模式
+                                st.session_state[edit_key] = False
+                                st.rerun()
+                            
+                            if col_cancel.form_submit_button("取消"):
+                                st.session_state[edit_key] = False
+                                st.rerun()
+                    else:
+                        # === 檢視模式 ===
+                        c1, c2 = st.columns([1, 2])
+                        with c1:
+                            # 顯示圖片
+                            if item.image_path and os.path.exists(item.image_path):
+                                st.image(item.image_path, use_container_width=True)
+                            else:
+                                st.text("無圖片")
+                        
+                        with c2:
+                            st.write(f"**顏色：** {item.color}")
+                            st.write(f"**材質：** {item.material}")
+                        
+                        # 按鈕區
+                        b1, b2 = st.columns(2)
+                        if b1.button("✏️ 編輯", key=f"btn_edit_{original_index}"):
+                            st.session_state[edit_key] = True
+                            st.rerun()
+                        
+                        if b2.button("🗑️ 刪除", key=f"btn_del_{original_index}"):
+                            st.session_state.wardrobe.pop(original_index)
                             save_current_user_data()
-                            # 關閉編輯模式
-                            st.session_state[edit_key] = False
                             st.rerun()
-                        
-                        if col_cancel.form_submit_button("取消"):
-                            st.session_state[edit_key] = False
-                            st.rerun()
-                else:
-                    # === 檢視模式 ===
-                    c1, c2 = st.columns([1, 2])
-                    with c1:
-                        # 顯示圖片
-                        if item.image_path and os.path.exists(item.image_path):
-                            st.image(item.image_path, use_container_width=True)
-                        else:
-                            st.text("無圖片")
-                    
-                    with c2:
-                        st.write(f"**顏色：** {item.color}")
-                        st.write(f"**材質：** {item.material}")
-                    
-                    # 按鈕區
-                    b1, b2 = st.columns(2)
-                    if b1.button("✏️ 編輯", key=f"btn_edit_{i}"):
-                        st.session_state[edit_key] = True
-                        st.rerun()
-                    
-                    if b2.button("🗑️ 刪除", key=f"btn_del_{i}"):
-                        st.session_state.wardrobe.pop(i)
-                        save_current_user_data()
-                        st.rerun()
