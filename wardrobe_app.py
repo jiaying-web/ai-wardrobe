@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-import google.generativeai as genai
 from PIL import Image
 import json
 import random
@@ -9,15 +8,6 @@ import os
 # ==========================================
 # ⚙️ 設定區
 # ==========================================
-
-# 設定 Google AI
-try:
-    GENAI_API_KEY = st.secrets["GENAI_API_KEY"]
-except:
-    GENAI_API_KEY = "" 
-
-if GENAI_API_KEY:
-    genai.configure(api_key=GENAI_API_KEY)
 
 # 定義資料庫檔案名稱
 DB_FILE = "wardrobe_db.json"
@@ -81,50 +71,11 @@ def get_real_weather():
     except:
         return 25.0 
 
-def analyze_image_with_ai(image):
-    """使用 Google Gemini 辨識衣服"""
-    if not GENAI_API_KEY:
-        st.error("⚠️ 尚未設定 API Key，無法使用 AI 辨識。")
-        return None
-    
-    # 使用更穩定快速的模型
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    
-    # 簡化 Prompt，提高成功率
-    prompt = """
-    分析這張圖片中的衣物。
-    請回傳純 JSON 格式，不要有任何 Markdown (如 ```json) 或其他文字。
-    格式如下：
-    {
-        "name": "衣物簡短名稱 (例如: 藍色牛仔外套)",
-        "category": "請從 [上衣, 下身, 外套, 飾品] 中選一個最接近的",
-        "color": "顏色",
-        "material": "材質"
-    }
-    """
-    try:
-        response = model.generate_content([prompt, image])
-        
-        # 嘗試清理並解析 JSON
-        clean_text = response.text.strip()
-        if clean_text.startswith("```json"):
-            clean_text = clean_text[7:]
-        if clean_text.endswith("```"):
-            clean_text = clean_text[:-3]
-        
-        return json.loads(clean_text)
-
-    except Exception as e:
-        # 在終端機印出詳細錯誤，方便除錯
-        print(f"AI Error: {e}")
-        st.error(f"AI 辨識失敗，請手動輸入資料。")
-        return None
-
 # ==========================================
 # 📱 網頁介面 (UI)
 # ==========================================
 
-st.set_page_config(page_title="AI 智能衣櫃 Pro", page_icon="👗")
+st.set_page_config(page_title="AI 智能衣櫃", page_icon="👗")
 
 # --- 1. 登入系統 ---
 if 'user_name' not in st.session_state:
@@ -157,11 +108,12 @@ with st.sidebar:
             del st.session_state[key]
         st.rerun()
     st.divider()
-    st.info("💡 現在你的衣櫃有記憶功能囉！重新整理網頁也不會消失。")
+    st.info("💡 只要在「新增衣物」加入衣服，就會自動加入穿搭選項喔！")
 
 st.title(f"👗 {st.session_state.user_name} 的智能衣櫃")
 
-tab1, tab2, tab3 = st.tabs(["🌤️ 智能穿搭", "📸 AI 入庫", "🗄️ 衣櫃管理"])
+# 這裡把 "AI 入庫" 改名為 "新增衣物"
+tab1, tab2, tab3 = st.tabs(["🌤️ 智能穿搭", "➕ 新增衣物", "🗄️ 衣櫃管理"])
 
 # --- 分頁 1: 智能穿搭 ---
 with tab1:
@@ -193,7 +145,7 @@ with tab1:
 
     if st.button("✨ 生成今日穿搭建議", use_container_width=True, type="primary"):
         if not tops or not bottoms:
-            st.warning("⚠️ 無法搭配！請檢查「AI 入庫」是否有足夠的上衣和褲子。")
+            st.warning("⚠️ 無法搭配！請檢查「新增衣物」是否有足夠的上衣和褲子。")
         else:
             top = random.choice(tops)
             bottom = random.choice(bottoms)
@@ -220,41 +172,25 @@ with tab1:
                 with c2:
                     st.markdown(f"### 👖 下身\n**{bottom.name}**\n\n<small>{bottom.color}</small>", unsafe_allow_html=True)
 
-# --- 分頁 2: AI 入庫 ---
+# --- 分頁 2: 新增衣物 (改為純手動) ---
 with tab2:
     st.header("📸 新增衣物")
+    st.write("上傳照片（僅供預覽），並手動輸入資料。")
     
-    if not GENAI_API_KEY:
-        st.error("⚠️ 請設定 Secrets 才能使用 AI 功能")
-        
-    uploaded_file = st.file_uploader("上傳照片", type=["jpg", "png", "jpeg"])
+    # 這裡只留上傳功能讓使用者看圖，但不做 AI 分析
+    uploaded_file = st.file_uploader("上傳照片 (選填)", type=["jpg", "png", "jpeg"])
     
-    if 'ai_result' not in st.session_state:
-        st.session_state.ai_result = {}
-
     if uploaded_file is not None:
         image = Image.open(uploaded_file)
         st.image(image, caption="預覽圖片", width=200)
-        
-        if GENAI_API_KEY and st.button("🤖 呼叫 AI 辨識", type="primary"):
-            with st.spinner("AI 正在分析..."):
-                result = analyze_image_with_ai(image)
-                if result:
-                    st.session_state.ai_result = result
-                    st.success("辨識成功！請確認下方資訊並按「加入」。")
 
-    res = st.session_state.ai_result
-    
+    st.markdown("### 輸入衣物資料")
     with st.form("add_item_form"):
-        name = st.text_input("名稱", value=res.get("name", ""))
+        name = st.text_input("名稱 (例如: 黑色帽T)")
         
-        cat_options = ["上衣", "下身", "外套", "飾品"]
-        ai_cat = res.get("category", "上衣")
-        cat_index = cat_options.index(ai_cat) if ai_cat in cat_options else 0
-        
-        category = st.selectbox("類別", cat_options, index=cat_index)
-        color = st.text_input("顏色", value=res.get("color", ""))
-        material = st.text_input("材質", value=res.get("material", ""))
+        category = st.selectbox("類別", ["上衣", "下身", "外套", "飾品"])
+        color = st.text_input("顏色")
+        material = st.text_input("材質")
         
         if st.form_submit_button("確認加入衣櫃", use_container_width=True):
             if name:
@@ -262,13 +198,9 @@ with tab2:
                 st.session_state.wardrobe.append(new_item)
                 save_current_user_data()
                 
-                st.session_state.ai_result = {} 
-                
-                # ✅ 這裡加上更明顯的成功提示
                 st.success(f"✅ 成功加入！{name} 已存入衣櫃。")
-                st.balloons() # 放氣球慶祝
+                st.balloons()
                 
-                # 稍微等待一下再重新整理，讓使用者看到提示
                 import time
                 time.sleep(1.5)
                 st.rerun()
