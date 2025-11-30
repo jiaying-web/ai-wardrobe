@@ -4,6 +4,7 @@ from PIL import Image
 import json
 import random
 import os
+import uuid  # 用來產生唯一的圖片檔名
 
 # ==========================================
 # ⚙️ 設定區
@@ -11,17 +12,24 @@ import os
 
 # 定義資料庫檔案名稱
 DB_FILE = "wardrobe_db.json"
+# 定義圖片存放資料夾
+IMG_DIR = "images"
+
+# 確保圖片資料夾存在
+if not os.path.exists(IMG_DIR):
+    os.makedirs(IMG_DIR)
 
 # ==========================================
 # 🧠 核心邏輯
 # ==========================================
 
 class ClothingItem:
-    def __init__(self, name, category, color, material):
+    def __init__(self, name, category, color, material, image_path=None):
         self.name = name
         self.category = category
         self.color = color
         self.material = material
+        self.image_path = image_path # 新增圖片路徑屬性
 
     def __repr__(self):
         return f"{self.name}"
@@ -31,12 +39,20 @@ class ClothingItem:
             "name": self.name,
             "category": self.category,
             "color": self.color,
-            "material": self.material
+            "material": self.material,
+            "image_path": self.image_path
         }
 
     @staticmethod
     def from_dict(data):
-        return ClothingItem(data["name"], data["category"], data["color"], data["material"])
+        # 使用 .get() 以防舊資料沒有 image_path 欄位時報錯
+        return ClothingItem(
+            data["name"], 
+            data["category"], 
+            data["color"], 
+            data["material"],
+            data.get("image_path") # 讀取圖片路徑
+        )
 
 # --- 資料庫存取函式 ---
 def load_all_data():
@@ -59,6 +75,22 @@ def save_current_user_data():
         db[st.session_state.user_name] = user_items
         save_all_data(db)
 
+def save_uploaded_image(uploaded_file):
+    """將上傳的圖片存到 images 資料夾"""
+    if uploaded_file is None:
+        return None
+    
+    # 產生一個唯一的檔名 (避免檔名重複)
+    file_ext = uploaded_file.name.split('.')[-1]
+    unique_filename = f"{uuid.uuid4()}.{file_ext}"
+    file_path = os.path.join(IMG_DIR, unique_filename)
+    
+    # 存檔
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    
+    return file_path
+
 # --- 其他功能 ---
 def get_real_weather():
     """使用 Open-Meteo 免費 API 獲取新竹市天氣"""
@@ -71,6 +103,22 @@ def get_real_weather():
     except:
         return 25.0 
 
+def find_similar_items(query, wardrobe):
+    """搜尋衣櫃中類似的物品"""
+    query = query.lower()
+    similar_items = []
+    keywords = query.split()
+    
+    for item in wardrobe:
+        score = 0
+        item_text = f"{item.name} {item.color} {item.material} {item.category}".lower()
+        for word in keywords:
+            if word in item_text:
+                score += 1
+        if score > 0:
+            similar_items.append(item)
+    return similar_items
+
 # ==========================================
 # 📱 網頁介面 (UI)
 # ==========================================
@@ -80,7 +128,7 @@ st.set_page_config(page_title="AI 智能衣櫃", page_icon="👗")
 # --- 1. 登入系統 ---
 if 'user_name' not in st.session_state:
     st.title("🔐 歡迎來到 AI 衣櫃")
-    st.markdown("請輸入名字以建立你的專屬衣櫃（系統會記住你的衣服喔！）")
+    st.markdown("請輸入名字以建立你的專屬衣櫃")
     name_input = st.text_input("你的名字：")
     
     if st.button("進入衣櫃"):
@@ -91,6 +139,7 @@ if 'user_name' not in st.session_state:
                 st.session_state.wardrobe = [ClothingItem.from_dict(item) for item in db[name_input]]
                 st.toast(f"歡迎回來，{name_input}！", icon="👋")
             else:
+                # 新用戶預設資料
                 st.session_state.wardrobe = []
                 st.session_state.wardrobe.append(ClothingItem("白色素T", "上衣", "白", "棉"))
                 st.session_state.wardrobe.append(ClothingItem("牛仔褲", "下身", "藍", "牛仔布"))
@@ -108,14 +157,13 @@ with st.sidebar:
             del st.session_state[key]
         st.rerun()
     st.divider()
-    st.info("💡 只要在「新增衣物」加入衣服，就會自動加入穿搭選項喔！")
+    st.info("💡 這次更新後，上傳的照片會被保存下來，並且顯示在每日穿搭中喔！")
 
 st.title(f"👗 {st.session_state.user_name} 的智能衣櫃")
 
-# 這裡把 "AI 入庫" 改名為 "新增衣物"
-tab1, tab2, tab3 = st.tabs(["🌤️ 智能穿搭", "➕ 新增衣物", "🗄️ 衣櫃管理"])
+tab1, tab2, tab3, tab4 = st.tabs(["🌤️ 智能穿搭", "🛍️ 購物建議", "➕ 新增衣物", "🗄️ 衣櫃管理"])
 
-# --- 分頁 1: 智能穿搭 ---
+# --- 分頁 1: 智能穿搭 (顯示圖片版) ---
 with tab1:
     st.subheader("今日新竹天氣")
     
@@ -157,66 +205,154 @@ with tab1:
             st.balloons()
             st.subheader("💡 今天的推薦搭配：")
             
+            # 定義顯示衣服的函式 (包含圖片)
+            def show_outfit_card(title, item):
+                st.markdown(f"### {title}")
+                # 如果有圖片路徑且檔案存在，就顯示圖片
+                if item.image_path and os.path.exists(item.image_path):
+                    st.image(item.image_path, use_container_width=True)
+                else:
+                    # 沒有圖片時顯示預設圖示
+                    if "上衣" in title: icon = "👕"
+                    elif "下身" in title: icon = "👖"
+                    else: icon = "🧥"
+                    st.markdown(f"<div style='font-size: 50px; text-align: center;'>{icon}</div>", unsafe_allow_html=True)
+                
+                st.markdown(f"**{item.name}**")
+                st.caption(f"{item.color} / {item.material}")
+
             if selected_outer:
                 c1, c2, c3 = st.columns(3)
-                with c1:
-                    st.markdown(f"### 👕 上身\n**{top.name}**\n\n<small>{top.color}</small>", unsafe_allow_html=True)
-                with c2:
-                    st.markdown(f"### 👖 下身\n**{bottom.name}**\n\n<small>{bottom.color}</small>", unsafe_allow_html=True)
-                with c3:
-                    st.markdown(f"### 🧥 外套\n**{selected_outer.name}**\n\n<small>{selected_outer.color}</small>", unsafe_allow_html=True)
+                with c1: show_outfit_card("👕 上身", top)
+                with c2: show_outfit_card("👖 下身", bottom)
+                with c3: show_outfit_card("🧥 外套", selected_outer)
             else:
                 c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown(f"### 👕 上身\n**{top.name}**\n\n<small>{top.color}</small>", unsafe_allow_html=True)
-                with c2:
-                    st.markdown(f"### 👖 下身\n**{bottom.name}**\n\n<small>{bottom.color}</small>", unsafe_allow_html=True)
+                with c1: show_outfit_card("👕 上身", top)
+                with c2: show_outfit_card("👖 下身", bottom)
 
-# --- 分頁 2: 新增衣物 (改為純手動) ---
+# --- 分頁 2: 購物建議 ---
 with tab2:
-    st.header("📸 新增衣物")
-    st.write("上傳照片（僅供預覽），並手動輸入資料。")
+    st.header("🛍️ 購物小幫手")
+    st.write("輸入關鍵字，檢查衣櫃有沒有類似款！")
     
-    # 這裡只留上傳功能讓使用者看圖，但不做 AI 分析
-    uploaded_file = st.file_uploader("上傳照片 (選填)", type=["jpg", "png", "jpeg"])
+    search_query = st.text_input("你想買什麼？", placeholder="例如: 白色T恤...")
     
-    if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="預覽圖片", width=200)
+    if search_query:
+        similar_results = find_similar_items(search_query, st.session_state.wardrobe)
+        
+        st.divider()
+        if similar_results:
+            st.warning(f"⚠️ 你的衣櫃已經有 {len(similar_results)} 件類似物品：")
+            
+            # 使用 columns 讓顯示更整齊，每行顯示 3 件
+            cols = st.columns(3)
+            for idx, item in enumerate(similar_results):
+                with cols[idx % 3]:
+                    if item.image_path and os.path.exists(item.image_path):
+                        st.image(item.image_path, use_container_width=True)
+                    st.write(f"**{item.name}**")
+                    st.caption(f"{item.category} / {item.color}")
+            
+            st.info("💡 建議：不需要重複購買喔！")
+        else:
+            st.success("✅ 衣櫃裡沒有類似款，可以買！")
 
-    st.markdown("### 輸入衣物資料")
+# --- 分頁 3: 新增衣物 (包含存檔圖片) ---
+with tab3:
+    st.header("📸 新增衣物")
+    
+    uploaded_file = st.file_uploader("上傳照片 (推薦)", type=["jpg", "png", "jpeg"])
+    
+    # 預覽圖片
+    if uploaded_file:
+        st.image(uploaded_file, caption="預覽中...", width=200)
+
     with st.form("add_item_form"):
         name = st.text_input("名稱 (例如: 黑色帽T)")
-        
         category = st.selectbox("類別", ["上衣", "下身", "外套", "飾品"])
         color = st.text_input("顏色")
         material = st.text_input("材質")
         
         if st.form_submit_button("確認加入衣櫃", use_container_width=True):
             if name:
-                new_item = ClothingItem(name, category, color, material)
+                # 1. 先儲存圖片
+                saved_image_path = save_uploaded_image(uploaded_file)
+                
+                # 2. 建立新物件 (包含圖片路徑)
+                new_item = ClothingItem(name, category, color, material, saved_image_path)
                 st.session_state.wardrobe.append(new_item)
+                
+                # 3. 存入資料庫
                 save_current_user_data()
                 
-                st.success(f"✅ 成功加入！{name} 已存入衣櫃。")
+                st.success(f"✅ 成功加入！{name}")
                 st.balloons()
                 
                 import time
-                time.sleep(1.5)
+                time.sleep(1.0)
                 st.rerun()
             else:
                 st.warning("請輸入名稱")
 
-# --- 分頁 3: 衣櫃管理 ---
-with tab3:
+# --- 分頁 4: 衣櫃管理 (新增編輯功能) ---
+with tab4:
     st.subheader("我的衣櫃庫存")
     if not st.session_state.wardrobe:
         st.info("衣櫃是空的")
     else:
+        # 遍歷所有衣服
         for i, item in enumerate(st.session_state.wardrobe):
             with st.expander(f"{i+1}. {item.name} ({item.category})"):
-                st.write(f"顏色：{item.color} | 材質：{item.material}")
-                if st.button("刪除", key=f"del_{i}"):
-                    st.session_state.wardrobe.pop(i)
-                    save_current_user_data()
-                    st.rerun()
+                
+                # 檢查是否處於「編輯模式」
+                edit_key = f"edit_mode_{i}"
+                if st.session_state.get(edit_key, False):
+                    # === 編輯模式 ===
+                    with st.form(f"edit_form_{i}"):
+                        st.caption("✏️ 編輯中...")
+                        new_name = st.text_input("名稱", value=item.name)
+                        new_cat = st.selectbox("類別", ["上衣", "下身", "外套", "飾品"], index=["上衣", "下身", "外套", "飾品"].index(item.category))
+                        new_color = st.text_input("顏色", value=item.color)
+                        new_mat = st.text_input("材質", value=item.material)
+                        
+                        col_save, col_cancel = st.columns(2)
+                        if col_save.form_submit_button("💾 儲存修改", type="primary"):
+                            # 更新物件資料
+                            item.name = new_name
+                            item.category = new_cat
+                            item.color = new_color
+                            item.material = new_mat
+                            # 存檔
+                            save_current_user_data()
+                            # 關閉編輯模式
+                            st.session_state[edit_key] = False
+                            st.rerun()
+                        
+                        if col_cancel.form_submit_button("取消"):
+                            st.session_state[edit_key] = False
+                            st.rerun()
+                else:
+                    # === 檢視模式 ===
+                    c1, c2 = st.columns([1, 2])
+                    with c1:
+                        # 顯示圖片
+                        if item.image_path and os.path.exists(item.image_path):
+                            st.image(item.image_path, use_container_width=True)
+                        else:
+                            st.text("無圖片")
+                    
+                    with c2:
+                        st.write(f"**顏色：** {item.color}")
+                        st.write(f"**材質：** {item.material}")
+                    
+                    # 按鈕區
+                    b1, b2 = st.columns(2)
+                    if b1.button("✏️ 編輯", key=f"btn_edit_{i}"):
+                        st.session_state[edit_key] = True
+                        st.rerun()
+                    
+                    if b2.button("🗑️ 刪除", key=f"btn_del_{i}"):
+                        st.session_state.wardrobe.pop(i)
+                        save_current_user_data()
+                        st.rerun()
